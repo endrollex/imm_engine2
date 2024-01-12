@@ -13,6 +13,8 @@
 #pragma comment(lib, "imm32")
 #pragma comment(lib, "d3d12")
 #pragma comment(lib, "dxgi")
+#pragma comment(lib, "D3DCompiler")
+#pragma comment(lib, "dxguid")
 using namespace imm;
 class imm_app: public base_win<imm_app>
 {

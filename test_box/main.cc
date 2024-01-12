@@ -16,7 +16,6 @@
 #pragma comment(lib, "D3DCompiler")
 #pragma comment(lib, "dxguid")
 using namespace imm;
-#include "geometry.h"
 #include <DirectXColors.h>
 #include <array>
 //
