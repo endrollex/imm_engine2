@@ -44,7 +44,7 @@ public:
 	ID3D12Resource* current_back_buffer() const;
 	D3D12_CPU_DESCRIPTOR_HANDLE current_back_buffer_view() const;
 	void on_render_blank();
-	HWND get_hwnd() const {return m_Hwnd;}
+	HWND get_hwnd() const {return m_MainHwnd;}
 	float aspect_ratio() const {return static_cast<float>(m_ClientWidth)/static_cast<float>(m_ClientHeight);}
 	int message_loop();
 	virtual void on_resize_drived() = 0;
@@ -64,7 +64,7 @@ public:
 	virtual PCWSTR class_name() const {return L"Immature Engine Class";}
 	void calc_frmae_stats();
 	//
-	HWND m_Hwnd = nullptr;
+	HWND m_MainHwnd = nullptr;
 	bool m_Paused = false;
 	bool m_Minimized = false;
 	bool m_Maximized = false;
@@ -80,7 +80,6 @@ public:
 	FLOAT m_DpiX = 96.0f;
 	FLOAT m_DpiY = 96.0f;
 	std::wstring m_WindowName = L"D3D12 Demo";
-	std::wstring m_Fps;
 	RECT m_WindowRect;
 	LONG m_WindowStyle;
 	ComPtr<ID3D12Device> m_Device;
@@ -137,7 +136,7 @@ LRESULT CALLBACK base_win<DERIVED_TYPE>::window_proc(HWND hwnd, UINT u_msg, WPAR
 		CREATESTRUCT *p_create = (CREATESTRUCT*)l_param;
 		p_this = (DERIVED_TYPE*)p_create->lpCreateParams;
 		SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)p_this);
-		p_this->m_Hwnd = hwnd;
+		p_this->m_MainHwnd = hwnd;
 	}
 	else p_this = (DERIVED_TYPE*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
 	if (p_this) return p_this->handle_message(u_msg, w_param, l_param);
@@ -163,7 +162,7 @@ BOOL base_win<DERIVED_TYPE>::init_win(HINSTANCE h_instance)
 	AdjustWindowRect(&m_WindowRect, m_WindowStyle, false);
 	int width  = m_WindowRect.right - m_WindowRect.left;
 	int height = m_WindowRect.bottom - m_WindowRect.top;
-	m_Hwnd = CreateWindow(
+	m_MainHwnd = CreateWindow(
 		class_name(),
 		m_WindowName.c_str(),
 		m_WindowStyle,
@@ -176,8 +175,8 @@ BOOL base_win<DERIVED_TYPE>::init_win(HINSTANCE h_instance)
 		h_instance,
 		this
 	);
-	ShowWindow(m_Hwnd, SW_SHOW);
-	return (m_Hwnd ? true : false);
+	ShowWindow(m_MainHwnd, SW_SHOW);
+	return (m_MainHwnd ? true : false);
 }
 //
 template <class DERIVED_TYPE>
@@ -364,19 +363,19 @@ void base_win<DERIVED_TYPE>::create_swap_chain()
 	ComPtr<IDXGISwapChain1> swap_chain;
 	AbortIfFailed(m_DxgiFact->CreateSwapChainForHwnd(
 		m_CommandQueue.Get(),
-		m_Hwnd,
+		m_MainHwnd,
 		&swap_desc,
 		nullptr,
 		nullptr,
 		swap_chain.GetAddressOf()));
 	//
-	AbortIfFailed(m_DxgiFact->MakeWindowAssociation(m_Hwnd, DXGI_MWA_NO_ALT_ENTER));
+	AbortIfFailed(m_DxgiFact->MakeWindowAssociation(m_MainHwnd, DXGI_MWA_NO_ALT_ENTER));
 	AbortIfFailed(swap_chain.As(&m_SwapChain));
 	m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
 	ComPtr<IDXGIOutput> p_output;
-	HRESULT hr;
-	hr = m_SwapChain->GetContainingOutput(&p_output);
-	std::wstring str = std::to_wstring(hr);
+	HRESULT hr_swap;
+	hr_swap = m_SwapChain->GetContainingOutput(&p_output);
+	std::wstring str = std::to_wstring(hr_swap);
 	OutputDebugString(str.c_str());
 }
 //
@@ -489,7 +488,7 @@ void base_win<DERIVED_TYPE>::on_resize_base()
 	m_ScissorRect = { 0, 0, m_ClientWidth, m_ClientHeight };
 	//
 	std::string text = "IMM "+std::to_string(m_ClientWidth)+" "+std::to_string(m_ClientHeight);
-	OutputDebugString(cha_s2ws(text).c_str());
+	OutputDebugString(uni::cha_s2ws(text).c_str());
 	//
 }
 //
@@ -500,21 +499,21 @@ void base_win<DERIVED_TYPE>::toggle_fullscreen()
 	if (m_FullScreen) {
 		OutputDebugString(L"IMM toggle_fullscreen m_FullScreen");
 		// Restore the window's attributes and size.
-		SetWindowLong(m_Hwnd, GWL_STYLE, m_WindowStyle);
+		SetWindowLong(m_MainHwnd, GWL_STYLE, m_WindowStyle);
 		SetWindowPos(
-			m_Hwnd,
+			m_MainHwnd,
 			HWND_NOTOPMOST,
 			m_WindowRect.left,
 			m_WindowRect.top,
 			m_WindowRect.right - m_WindowRect.left,
 			m_WindowRect.bottom - m_WindowRect.top,
 			SWP_FRAMECHANGED | SWP_NOACTIVATE);
-		ShowWindow(m_Hwnd, SW_NORMAL);
+		ShowWindow(m_MainHwnd, SW_NORMAL);
 		m_FullScreen = false;
 		return;
 	}
-	GetWindowRect(m_Hwnd, &m_WindowRect);
-	SetWindowLong(m_Hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME));
+	GetWindowRect(m_MainHwnd, &m_WindowRect);
+	SetWindowLong(m_MainHwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME));
 	RECT full_rect;
 	DEVMODE dev_mode = {};
 	dev_mode.dmSize = sizeof(DEVMODE);
@@ -526,14 +525,14 @@ void base_win<DERIVED_TYPE>::toggle_fullscreen()
 		dev_mode.dmPosition.y + static_cast<LONG>(dev_mode.dmPelsHeight)
 	};
 	SetWindowPos(
-		m_Hwnd,
+		m_MainHwnd,
 		HWND_TOP,
 		full_rect.left,
 		full_rect.top,
 		full_rect.right,
 		full_rect.bottom,
 		SWP_FRAMECHANGED | SWP_NOACTIVATE);
-	ShowWindow(m_Hwnd, SW_MAXIMIZE);
+	ShowWindow(m_MainHwnd, SW_MAXIMIZE);
 	m_FullScreen = true;
 }
 //
@@ -600,10 +599,10 @@ void base_win<DERIVED_TYPE>::on_render_blank()
 	m_CommandList->RSSetScissorRects(1, &m_ScissorRect);
 	// Clear the back buffer and depth buffer.
 	const float clear_color[] = { 0.0f, 0.0f, 1.0f, 1.0f };
-	m_CommandList->ClearRenderTargetView(current_back_buffer_view(), clear_color, 0, nullptr);
-	m_CommandList->ClearDepthStencilView(depth_stencil_view(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-	D3D12_CPU_DESCRIPTOR_HANDLE depthst_v = depth_stencil_view();
 	D3D12_CPU_DESCRIPTOR_HANDLE cbuff_v = current_back_buffer_view();
+	D3D12_CPU_DESCRIPTOR_HANDLE depthst_v = depth_stencil_view();
+	m_CommandList->ClearRenderTargetView(cbuff_v, clear_color, 0, nullptr);
+	m_CommandList->ClearDepthStencilView(depthst_v, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 	// Specify the buffers we are going to render to.
 	m_CommandList->OMSetRenderTargets(1,
 		&cbuff_v,
@@ -667,7 +666,7 @@ LRESULT base_win<DERIVED_TYPE>::handle_message(UINT u_msg, WPARAM w_param, LPARA
 		OutputDebugString(L"IMM WM_CREATE");
 		// Save the DXSample* passed in to CreateWindow.
 		LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(l_param);
-		SetWindowLongPtr(m_Hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
+		SetWindowLongPtr(m_MainHwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
 		}
 		return 0;
 	// WM_ACTIVATE is sent when the window is activated or deactivated.
@@ -748,7 +747,7 @@ LRESULT base_win<DERIVED_TYPE>::handle_message(UINT u_msg, WPARAM w_param, LPARA
 		}
 		return 0;
 	}
-	return DefWindowProc(m_Hwnd, u_msg, w_param, l_param);
+	return DefWindowProc(m_MainHwnd, u_msg, w_param, l_param);
 }
 //
 template <class DERIVED_TYPE>
@@ -826,7 +825,12 @@ void base_win<DERIVED_TYPE>::calc_frmae_stats()
 	frame_cnt++;
 	// Compute averages over one second period.
 	if ((m_Timer.total_time()-time_elapsed) >= 1.0f) {
-		m_Fps = std::to_wstring(frame_cnt);
+		float fps = (float)frame_cnt; // fps = frame_cnt / 1
+		float mspf = 1000.0f / fps;
+		std::wstring fps_str = std::to_wstring(fps);
+		std::wstring mspf_tr = std::to_wstring(mspf);
+		std::wstring window_text = m_WindowName + L" fps: " + fps_str + L" mspf: " + mspf_tr;
+		SetWindowText(m_MainHwnd, window_text.c_str());
 		// Reset for next average.
 		frame_cnt = 0;
 		time_elapsed += 1.0f;

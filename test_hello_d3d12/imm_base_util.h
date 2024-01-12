@@ -15,6 +15,11 @@
 #include <codecvt>
 #include <string>
 #include <sstream>
+#include <unordered_map>
+#include <DirectXMath.h>
+#include <DirectXCollision.h>
+#include <D3DCompiler.h>
+using namespace DirectX;
 namespace imm
 {
 ////////////////
@@ -39,10 +44,11 @@ namespace imm
 #define ERROR_MESA(x) {MessageBoxA(0, x, "ERROR", MB_OK); assert(false); abort();}
 #define ERROR_MESA_PASS(x) {MessageBoxA(0, x, "ERROR", MB_OK);}
 ////////////////
-// static
+// universal
 ////////////////
 ////////////////
-namespace glo{
+namespace uni
+{
 static std::map<std::string, std::string> IMM_PATH;
 static const bool ALWAYS_TRUE = true;
 static const size_t VECTOR_RESERVE = 1000;
@@ -69,7 +75,6 @@ static const std::wstring SCENE_FIRST = L"_00";
 static const std::wstring SCENE_SECOND = L"_01";
 static std::string EMPTY_STRING = "";
 static bool IS_STANDALONE_M3DTOB3M = false;
-}
 //
 std::wstring cha_s2ws(const std::string &str)
 {
@@ -102,12 +107,13 @@ std::string format_hr(const HRESULT &hr_get, const std::string &s_func)
 	std::string text = s_hr+"\n"+s_file+"\n"+line_num+"\n"+s_func;
 	return text;
 }
+}
 //
 #ifndef AbortIfFailed
 #define AbortIfFailed(x) \
 { \
 	HRESULT hr_get = (x); \
-	if(FAILED(hr_get)) {MessageBoxA(NULL, format_hr(hr_get, cha_ws2s(L#x)).c_str(), "HRESULT", MB_OK); abort();} \
+	if(FAILED(hr_get)) {MessageBoxA(NULL, uni::format_hr(hr_get, uni::cha_ws2s(L#x)).c_str(), "HRESULT", MB_OK); abort();} \
 }
 #endif
 ////////////////
@@ -202,5 +208,347 @@ void game_timer::tick()
 	// processor, then m_DeltaTime can be negative.
 	if (m_DeltaTime < 0.0) m_DeltaTime = 0.0;
 }
+////////////////
+// 
+////////////////
+////////////////
+struct vertex_pc
+{
+	XMFLOAT3 pos;
+	XMFLOAT4 color;
+};
+////////////////
+// math_helper
+////////////////
+////////////////
+class math_helper
+{
+public:
+	// Returns random float in [0, 1).
+	static float rand_f() { return (float)(rand()) / (float)RAND_MAX; }
+	// Returns random float in [a, b).
+	static float rand_f(float a, float b) { return a + rand_f()*(b-a); }
+	static int rand_i(int a, int b) { return a + rand() % ((b - a) + 1); }
+	template<typename T> static T min_t(const T& a, const T& b) { return a < b ? a : b; }
+	template<typename T> static T max_t(const T& a, const T& b) { return a > b ? a : b; }
+	template<typename T> static T lerp_t(const T& a, const T& b, float t) { return a + (b-a)*t; }
+	template<typename T> static T clamp_t(const T& x, const T& low, const T& high) { return x < low ? low : (x > high ? high : x); }
+	// Returns the polar angle of the point (x,y) in [0, 2*PI).
+	static float angle_from_xy(float x, float y);
+	static DirectX::XMVECTOR spherical_to_cartesian(float radius, float theta, float phi);
+	static DirectX::XMMATRIX inverse_transpose(DirectX::CXMMATRIX M);
+	static DirectX::XMVECTOR rand_unit_vec3();
+	static DirectX::XMVECTOR rand_hemisphere_unit_vec3(DirectX::XMVECTOR n);
+	//
+	static DirectX::XMFLOAT4X4 identity4x4() {
+		static DirectX::XMFLOAT4X4 I(
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f,
+			0.0f, 0.0f, 0.0f, 1.0f);
+		return I;
+	}
+	static const float infinity;
+	static const float pi;
+};
+const float math_helper::infinity = FLT_MAX;
+const float math_helper::pi = 3.1415926535f;
+float math_helper::angle_from_xy(float x, float y)
+{
+	float theta = 0.0f;
+	// Quadrant I or IV
+	if(x >= 0.0f) {
+		// If x = 0, then atanf(y/x) = +pi/2 if y > 0
+		//                atanf(y/x) = -pi/2 if y < 0
+		theta = atanf(y / x); // in [-pi/2, +pi/2]
+		if(theta < 0.0f)
+			theta += 2.0f*math_helper::pi; // in [0, 2*pi).
+	}
+	// Quadrant II or III
+	else {
+		theta = atanf(y/x) + math_helper::pi; // in [0, 2*pi).
+	}
+	return theta;
+}
+//
+DirectX::XMVECTOR math_helper::spherical_to_cartesian(float radius, float theta, float phi)
+{
+	return DirectX::XMVectorSet(
+		radius*sinf(phi)*cosf(theta),
+		radius*cosf(phi),
+		radius*sinf(phi)*sinf(theta),
+		1.0f);
+}
+//
+DirectX::XMMATRIX math_helper::inverse_transpose(DirectX::CXMMATRIX M)
+{
+	// Inverse-transpose is just applied to normals.  So zero out 
+	// translation row so that it doesn't get into our inverse-transpose
+	// calculation--we don't want the inverse-transpose of the translation.
+	DirectX::XMMATRIX A = M;
+	A.r[3] = DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f);
+	DirectX::XMVECTOR det = DirectX::XMMatrixDeterminant(A);
+	return DirectX::XMMatrixTranspose(DirectX::XMMatrixInverse(&det, A));
+}
+//
+DirectX::XMVECTOR math_helper::rand_unit_vec3() {
+	XMVECTOR one  = XMVectorSet(1.0f, 1.0f, 1.0f, 1.0f);
+	// Keep trying until we get a point on/in the hemisphere.
+	while (true) {
+		// Generate random point in the cube [-1,1]^3.
+		XMVECTOR v = XMVectorSet(rand_f(-1.0f, 1.0f), rand_f(-1.0f, 1.0f), rand_f(-1.0f, 1.0f), 0.0f);
+		// Ignore points outside the unit sphere in order to get an even distribution 
+		// over the unit sphere.  Otherwise points will clump more on the sphere near 
+		// the corners of the cube.
+		if( XMVector3Greater( XMVector3LengthSq(v), one) ) continue;
+		return XMVector3Normalize(v);
+	}
+}
+//
+DirectX::XMVECTOR math_helper::rand_hemisphere_unit_vec3(DirectX::XMVECTOR n) {
+	XMVECTOR one  = XMVectorSet(1.0f, 1.0f, 1.0f, 1.0f);
+	XMVECTOR zero = XMVectorZero();
+	// Keep trying until we get a point on/in the hemisphere.
+	while (true) {
+		// Generate random point in the cube [-1,1]^3.
+		XMVECTOR v = XMVectorSet(rand_f(-1.0f, 1.0f), rand_f(-1.0f, 1.0f), rand_f(-1.0f, 1.0f), 0.0f);
+		// Ignore points outside the unit sphere in order to get an even distribution 
+		// over the unit sphere.  Otherwise points will clump more on the sphere near 
+		// the corners of the cube.
+		if( XMVector3Greater( XMVector3LengthSq(v), one) ) continue;
+		// Ignore points in the bottom hemisphere.
+		if( XMVector3Less( XMVector3Dot(n, v), zero ) ) continue;
+		return XMVector3Normalize(v);
+	}
+}
+////////////////
+// 
+////////////////
+////////////////
+template<typename T>
+class upload_buffer
+{
+public:
+	upload_buffer(ID3D12Device* device, UINT element_count, bool is_constant_buffer)
+	{
+		m_IsConstantBuffer = is_constant_buffer;
+		m_Elementbyte_size = sizeof(T);
+		// Constant buffer elements need to be multiples of 256 bytes.
+		// This is because the hardware can only view constant data 
+		// at m*256 byte offsets and of n*256 byte lengths. 
+		// typedef struct D3D12_CONSTANT_BUFFER_VIEW_DESC {
+		// UINT64 OffsetInBytes; // multiple of 256
+		// UINT   SizeInBytes;   // multiple of 256
+		// } D3D12_CONSTANT_BUFFER_VIEW_DESC;
+		if(is_constant_buffer)
+			m_Elementbyte_size = d3d_util::calc_constant_buffer_byte_size(sizeof(T));
+		CD3DX12_HEAP_PROPERTIES heap_upload(D3D12_HEAP_TYPE_UPLOAD);
+		CD3DX12_RESOURCE_DESC resource_desc_buffer = CD3DX12_RESOURCE_DESC::Buffer(m_Elementbyte_size*element_count);
+		AbortIfFailed(device->CreateCommittedResource(
+			&heap_upload,
+			D3D12_HEAP_FLAG_NONE,
+			&resource_desc_buffer,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&m_upload_buffer)));
+		AbortIfFailed(m_upload_buffer->Map(0, nullptr, reinterpret_cast<void**>(&m_MappedData)));
+		// We do not need to unmap until we are done with the resource.  However, we must not write to
+		// the resource while it is in use by the GPU (so we must use synchronization techniques).
+	}
+	upload_buffer(const upload_buffer& rhs) = delete;
+	upload_buffer& operator=(const upload_buffer& rhs) = delete;
+	~upload_buffer()
+	{
+		if(m_upload_buffer != nullptr)
+			m_upload_buffer->Unmap(0, nullptr);
+		m_MappedData = nullptr;
+	}
+	ID3D12Resource* resource() const
+	{
+		return m_upload_buffer.Get();
+	}
+	void copy_data(int elementIndex, const T& data)
+	{
+		memcpy(&m_MappedData[elementIndex*m_Elementbyte_size], &data, sizeof(T));
+	}
+private:
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_upload_buffer;
+	BYTE* m_MappedData = nullptr;
+	UINT m_Elementbyte_size = 0;
+	bool m_IsConstantBuffer = false;
+};
+////////////////
+// 
+////////////////
+////////////////
+class d3d_util
+{
+public:
+	static bool is_key_down(int v_key_code);
+	static std::string to_string(HRESULT hr);
+	static UINT calc_constant_buffer_byte_size(UINT byte_size)
+	{
+		// Constant buffers must be a multiple of the minimum hardware
+		// allocation size (usually 256 bytes).  So round up to nearest
+		// multiple of 256.  We do this by adding 255 and then masking off
+		// the lower 2 bytes which store all bits < 256.
+		// Example: Suppose byte_size = 300.
+		// (300 + 255) & ~255
+		// 555 & ~255
+		// 0x022B & ~0x00ff
+		// 0x022B & 0xff00
+		// 0x0200
+		// 512
+		return (byte_size + 255) & ~255;
+	}
+	static Microsoft::WRL::ComPtr<ID3DBlob> load_binary(const std::wstring& filename);
+	static Microsoft::WRL::ComPtr<ID3D12Resource> create_default_buffer(
+		ID3D12Device* device,
+		ID3D12GraphicsCommandList* cmd_list,
+		const void* init_data,
+		UINT64 byte_size,
+		Microsoft::WRL::ComPtr<ID3D12Resource>& upload_buffer);
+	static Microsoft::WRL::ComPtr<ID3DBlob> compile_shader(
+		const std::wstring& filename,
+		const D3D_SHADER_MACRO* defines,
+		const std::string& entrypoint,
+		const std::string& target);
+};
+ComPtr<ID3DBlob> d3d_util::compile_shader(
+	const std::wstring& filename,
+	const D3D_SHADER_MACRO* defines,
+	const std::string& entrypoint,
+	const std::string& target)
+{
+	UINT compile_flags = 0;
+#if defined(DEBUG) || defined(_DEBUG)  
+	compile_flags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+#endif
+	HRESULT hr_compile = S_OK;
+	ComPtr<ID3DBlob> byte_code = nullptr;
+	ComPtr<ID3DBlob> errors;
+	hr_compile = D3DCompileFromFile(filename.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+		entrypoint.c_str(), target.c_str(), compile_flags, 0, &byte_code, &errors);
+	if(errors != nullptr) OutputDebugStringA((char*)errors->GetBufferPointer());
+	AbortIfFailed(hr_compile);
+	return byte_code;
+}
+//
+Microsoft::WRL::ComPtr<ID3D12Resource> d3d_util::create_default_buffer(
+	ID3D12Device* device,
+	ID3D12GraphicsCommandList* cmd_list,
+	const void* init_data,
+	UINT64 byte_size,
+	Microsoft::WRL::ComPtr<ID3D12Resource>& upload_buffer)
+{
+	ComPtr<ID3D12Resource> default_buffer;
+	// Create the actual default buffer resource.
+	CD3DX12_HEAP_PROPERTIES heap_default(D3D12_HEAP_TYPE_DEFAULT);
+	CD3DX12_RESOURCE_DESC resource_desc_buffer = CD3DX12_RESOURCE_DESC::Buffer(byte_size);
+	CD3DX12_HEAP_PROPERTIES heap_upload(D3D12_HEAP_TYPE_UPLOAD);
+	AbortIfFailed(device->CreateCommittedResource(
+		&heap_default,
+		D3D12_HEAP_FLAG_NONE,
+		&resource_desc_buffer,
+		D3D12_RESOURCE_STATE_COMMON,
+		nullptr,
+		IID_PPV_ARGS(default_buffer.GetAddressOf())));
+	// In order to copy CPU memory data into our default buffer, we need to create
+	// an intermediate upload heap. 
+	AbortIfFailed(device->CreateCommittedResource(
+		&heap_upload,
+		D3D12_HEAP_FLAG_NONE,
+		&resource_desc_buffer,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(upload_buffer.GetAddressOf())));
+	// Describe the data we want to copy into the default buffer.
+	D3D12_SUBRESOURCE_DATA sub_resource_data = {};
+	sub_resource_data.pData = init_data;
+	sub_resource_data.RowPitch = byte_size;
+	sub_resource_data.SlicePitch = sub_resource_data.RowPitch;
+	// Schedule to copy the data to the default buffer resource.  At a high level, the helper function UpdateSubresources
+	// will copy the CPU memory into the intermediate upload heap.  Then, using ID3D12CommandList::CopySubresourceRegion,
+	// the intermediate upload heap data will be copied to mBuffer.
+	const D3D12_RESOURCE_BARRIER reso_barrier(
+		CD3DX12_RESOURCE_BARRIER::Transition(
+			default_buffer.Get(),
+			D3D12_RESOURCE_STATE_COMMON,
+			D3D12_RESOURCE_STATE_COPY_DEST));
+	cmd_list->ResourceBarrier(1, &reso_barrier);
+	UpdateSubresources<1>(cmd_list, default_buffer.Get(), upload_buffer.Get(), 0, 0, 1, &sub_resource_data);
+	const D3D12_RESOURCE_BARRIER reso_barrier2(
+		CD3DX12_RESOURCE_BARRIER::Transition(
+			default_buffer.Get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_GENERIC_READ));
+	cmd_list->ResourceBarrier(1, &reso_barrier2);
+	// Note: upload_buffer has to be kept alive after the above function calls because
+	// the command list has not been executed yet that performs the actual copy.
+	// The caller can Release the upload_buffer after it knows the copy has been executed.
+	return default_buffer;
+}
+////////////////
+// 
+////////////////
+////////////////
+// Defines a subrange of geometry in a mesh_geometry.  This is for when multiple
+// geometries are stored in one vertex and index buffer.  It provides the offsets
+// and data needed to draw a subset of geometry stores in the vertex and index 
+// buffers so that we can implement the technique described by Figure 6.3.
+struct submesh_geometry
+{
+	UINT index_count = 0;
+	UINT start_index_location = 0;
+	INT base_vertex_location = 0;
+	// Bounding box of the geometry defined by this submesh. 
+	// This is used in later chapters of the book.
+	DirectX::BoundingBox bounds;
+};
+
+struct mesh_geometry
+{
+	// Give it a name so we can look it up by name.
+	std::string name;
+	// System memory copies.  Use Blobs because the vertex/index format can be generic.
+	// It is up to the client to cast appropriately.  
+	Microsoft::WRL::ComPtr<ID3DBlob> vertex_buffer_cpu = nullptr;
+	Microsoft::WRL::ComPtr<ID3DBlob> index_buffer_cpu  = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12Resource> vertex_buffer_gpu = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12Resource> index_buffer_gpu = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12Resource> vertex_buffer_uploader = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12Resource> index_buffer_uploader = nullptr;
+	// Data about the buffers.
+	UINT vertex_byte_stride = 0;
+	UINT vertex_buffer_byte_size = 0;
+	DXGI_FORMAT index_format = DXGI_FORMAT_R16_UINT;
+	UINT index_buffer_byte_size = 0;
+	// A mesh_geometry may store multiple geometries in one vertex/index buffer.
+	// Use this container to define the Submesh geometries so we can draw
+	// the Submeshes individually.
+	std::unordered_map<std::string, submesh_geometry> draw_args;
+	D3D12_VERTEX_BUFFER_VIEW vertex_buffer_view() const
+	{
+		D3D12_VERTEX_BUFFER_VIEW vbv;
+		vbv.BufferLocation = vertex_buffer_gpu->GetGPUVirtualAddress();
+		vbv.StrideInBytes = vertex_byte_stride;
+		vbv.SizeInBytes = vertex_buffer_byte_size;
+		return vbv;
+	}
+	D3D12_INDEX_BUFFER_VIEW index_buffer_view() const
+	{
+		D3D12_INDEX_BUFFER_VIEW ibv;
+		ibv.BufferLocation = index_buffer_gpu->GetGPUVirtualAddress();
+		ibv.Format = index_format;
+		ibv.SizeInBytes = index_buffer_byte_size;
+		return ibv;
+	}
+	// We can free this memory after we finish upload to the GPU.
+	void dispose_uploaders()
+	{
+		vertex_buffer_uploader = nullptr;
+		index_buffer_uploader = nullptr;
+	}
+};
 }
 #endif
