@@ -92,7 +92,7 @@ public:
 	ComPtr<ID3D12DescriptorHeap> m_RtvHeap;
 	ComPtr<ID3D12DescriptorHeap> m_DsvHeap;
 	static const int m_SwapChainBufferCount = 2;
-	int m_CurrBackBuffer = 0;
+	int m_CurrBackBufferIX = 0;
 	ComPtr<ID3D12Resource> m_SwapChainBuffer[m_SwapChainBufferCount];
 	ComPtr<ID3D12Resource> m_DepthStencilBuffer;
 	bool m_4xMsaaState = false;
@@ -372,11 +372,6 @@ void base_win<DERIVED_TYPE>::create_swap_chain()
 	AbortIfFailed(m_DxgiFact->MakeWindowAssociation(m_MainHwnd, DXGI_MWA_NO_ALT_ENTER));
 	AbortIfFailed(swap_chain.As(&m_SwapChain));
 	m_FrameIndex = m_SwapChain->GetCurrentBackBufferIndex();
-	ComPtr<IDXGIOutput> p_output;
-	HRESULT hr_swap;
-	hr_swap = m_SwapChain->GetContainingOutput(&p_output);
-	std::wstring str = std::to_wstring(hr_swap);
-	OutputDebugString(str.c_str());
 }
 //
 template <class DERIVED_TYPE>
@@ -419,7 +414,7 @@ void base_win<DERIVED_TYPE>::on_resize_base()
 		m_ClientHeight,
 		m_BackBufferFormat,
 		desc.Flags));
-	m_CurrBackBuffer = 0;
+	m_CurrBackBufferIX = 0;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle(m_RtvHeap->GetCPUDescriptorHandleForHeapStart());
 	for (UINT i = 0; i < m_SwapChainBufferCount; i++)
 	{
@@ -566,7 +561,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE base_win<DERIVED_TYPE>::depth_stencil_view() const
 template <class DERIVED_TYPE>
 ID3D12Resource* base_win<DERIVED_TYPE>::current_back_buffer() const
 {
-	return m_SwapChainBuffer[m_CurrBackBuffer].Get();
+	return m_SwapChainBuffer[m_CurrBackBufferIX].Get();
 }
 //
 template <class DERIVED_TYPE>
@@ -574,7 +569,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE base_win<DERIVED_TYPE>::current_back_buffer_view() c
 {
 	return CD3DX12_CPU_DESCRIPTOR_HANDLE(
 		m_RtvHeap->GetCPUDescriptorHandleForHeapStart(),
-		m_CurrBackBuffer,
+		m_CurrBackBufferIX,
 		m_RtvDescriptorSize);
 }
 //
@@ -622,7 +617,7 @@ void base_win<DERIVED_TYPE>::on_render_blank()
 	m_CommandQueue->ExecuteCommandLists(_countof(cmds_lists), cmds_lists);
 	// swap the back and front buffers
 	AbortIfFailed(m_SwapChain->Present(0, DXGI_PRESENT_ALLOW_TEARING));
-	m_CurrBackBuffer = m_SwapChain->GetCurrentBackBufferIndex();
+	m_CurrBackBufferIX = m_SwapChain->GetCurrentBackBufferIndex();
 	// Wait until frame commands are complete.  This waiting is inefficient and is
 	// done for simplicity.  Later we will show how to organize our rendering code
 	// so we do not have to wait per frame.

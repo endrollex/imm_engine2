@@ -332,7 +332,7 @@ public:
 	upload_buffer(ID3D12Device* device, UINT element_count, bool is_constant_buffer)
 	{
 		m_IsConstantBuffer = is_constant_buffer;
-		m_Elementbyte_size = sizeof(T);
+		m_ElementbyteSize = sizeof(T);
 		// Constant buffer elements need to be multiples of 256 bytes.
 		// This is because the hardware can only view constant data 
 		// at m*256 byte offsets and of n*256 byte lengths. 
@@ -340,18 +340,17 @@ public:
 		// UINT64 OffsetInBytes; // multiple of 256
 		// UINT   SizeInBytes;   // multiple of 256
 		// } D3D12_CONSTANT_BUFFER_VIEW_DESC;
-		if(is_constant_buffer)
-			m_Elementbyte_size = d3d_util::calc_constant_buffer_byte_size(sizeof(T));
+		if (is_constant_buffer) m_ElementbyteSize = d3d_util::calc_constant_buffer_byte_size(sizeof(T));
 		CD3DX12_HEAP_PROPERTIES heap_upload(D3D12_HEAP_TYPE_UPLOAD);
-		CD3DX12_RESOURCE_DESC resource_desc_buffer = CD3DX12_RESOURCE_DESC::Buffer(m_Elementbyte_size*element_count);
+		CD3DX12_RESOURCE_DESC resource_desc_buffer = CD3DX12_RESOURCE_DESC::Buffer(m_ElementbyteSize*element_count);
 		AbortIfFailed(device->CreateCommittedResource(
 			&heap_upload,
 			D3D12_HEAP_FLAG_NONE,
 			&resource_desc_buffer,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
-			IID_PPV_ARGS(&m_upload_buffer)));
-		AbortIfFailed(m_upload_buffer->Map(0, nullptr, reinterpret_cast<void**>(&m_MappedData)));
+			IID_PPV_ARGS(&m_UploadBuffer)));
+		AbortIfFailed(m_UploadBuffer->Map(0, nullptr, reinterpret_cast<void**>(&m_MappedData)));
 		// We do not need to unmap until we are done with the resource.  However, we must not write to
 		// the resource while it is in use by the GPU (so we must use synchronization techniques).
 	}
@@ -359,22 +358,21 @@ public:
 	upload_buffer& operator=(const upload_buffer& rhs) = delete;
 	~upload_buffer()
 	{
-		if(m_upload_buffer != nullptr)
-			m_upload_buffer->Unmap(0, nullptr);
+		if (m_UploadBuffer != nullptr) m_UploadBuffer->Unmap(0, nullptr);
 		m_MappedData = nullptr;
 	}
 	ID3D12Resource* resource() const
 	{
-		return m_upload_buffer.Get();
+		return m_UploadBuffer.Get();
 	}
-	void copy_data(int elementIndex, const T& data)
+	void copy_data(int element_index, const T& data)
 	{
-		memcpy(&m_MappedData[elementIndex*m_Elementbyte_size], &data, sizeof(T));
+		memcpy(&m_MappedData[element_index*m_ElementbyteSize], &data, sizeof(T));
 	}
 private:
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_upload_buffer;
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_UploadBuffer;
 	BYTE* m_MappedData = nullptr;
-	UINT m_Elementbyte_size = 0;
+	UINT m_ElementbyteSize = 0;
 	bool m_IsConstantBuffer = false;
 };
 ////////////////
@@ -489,7 +487,7 @@ Microsoft::WRL::ComPtr<ID3D12Resource> d3d_util::create_default_buffer(
 	return default_buffer;
 }
 ////////////////
-// 
+// mesh_geometry
 ////////////////
 ////////////////
 // Defines a subrange of geometry in a mesh_geometry.  This is for when multiple
@@ -505,7 +503,7 @@ struct submesh_geometry
 	// This is used in later chapters of the book.
 	DirectX::BoundingBox bounds;
 };
-
+//
 struct mesh_geometry
 {
 	// Give it a name so we can look it up by name.

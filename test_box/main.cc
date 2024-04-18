@@ -165,7 +165,7 @@ void imm_app::draw_scene_imm()
 	m_CommandQueue->ExecuteCommandLists(_countof(cmds_lists), cmds_lists);
 	// swap the back and front buffers
 	AbortIfFailed(m_SwapChain->Present(0, 0));
-	m_CurrBackBuffer = (m_CurrBackBuffer + 1) % m_SwapChainBufferCount;
+	m_CurrBackBufferIX = (m_CurrBackBufferIX + 1) % m_SwapChainBufferCount;
 	// Wait until frame commands are complete.  This waiting is inefficient and is
 	// done for simplicity.  Later we will show how to organize our rendering code
 	// so we do not have to wait per frame.
@@ -240,13 +240,13 @@ void imm_app::build_root_singnature()
 	cbv_table.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
 	slot_root_parameter[0].InitAsDescriptorTable(1, &cbv_table);
 	// A root signature is an array of root parameters.
-	CD3DX12_ROOT_SIGNATURE_DESC root_sig_desc(1, slot_root_parameter, 0, nullptr, 
-		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+	CD3DX12_ROOT_SIGNATURE_DESC root_sig_desc(
+		1, slot_root_parameter, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 	// create a root signature with a single slot which points to a descriptor range consisting of a single constant buffer
 	ComPtr<ID3DBlob> serialized_root_sig = nullptr;
 	ComPtr<ID3DBlob> error_blob = nullptr;
-	HRESULT hr_serialze = D3D12SerializeRootSignature(&root_sig_desc, D3D_ROOT_SIGNATURE_VERSION_1,
-		serialized_root_sig.GetAddressOf(), error_blob.GetAddressOf());
+	HRESULT hr_serialze = D3D12SerializeRootSignature(
+		&root_sig_desc, D3D_ROOT_SIGNATURE_VERSION_1, serialized_root_sig.GetAddressOf(), error_blob.GetAddressOf());
 	if(error_blob != nullptr) {
 		OutputDebugStringA((char*)error_blob->GetBufferPointer());
 	}
